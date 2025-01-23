@@ -15,7 +15,7 @@ service = Service(driver_path)
 
 # Set up Chrome options
 chrome_options = Options()
-chrome_options.add_argument("--headless")  # Headless mode can be used if you don't want the browser window to pop up
+# chrome_options.add_argument("--headless")  # Headless mode can be used if you don't want the browser window to pop up
 
 # Set up the Chrome WebDriver
 driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -71,8 +71,10 @@ try:
 
     time.sleep(3)
 
-    # Wait for 10 seconds before proceeding to export and download
-    time.sleep(10)
+    ready_message = wait.until(
+        EC.presence_of_element_located((By.XPATH, "//span[contains(text(), 'ready in')]"))
+    )
+    print("Terminal is ready! Proceeding with export and download...")
 
     # Export button
     try:
