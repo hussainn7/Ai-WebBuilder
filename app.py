@@ -24,12 +24,7 @@ SYSTEM_TYPE = platform.system().lower()
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
-    'DATABASE_URL', 
-    'postgresql://postgres:password@localhost:5432/aiwebbuilder'  # Local development fallback
-    if IS_PRODUCTION else 
-    'sqlite:///chat_history.db'  # SQLite for local testing
-)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Add this fix for Render's DATABASE_URL
