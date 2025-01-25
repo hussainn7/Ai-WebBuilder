@@ -18,6 +18,10 @@ import platform
 import logging
 from datetime import datetime
 
+# Environment and system configuration
+IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production'
+SYSTEM_TYPE = platform.system().lower()
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
@@ -48,10 +52,6 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
-
-# Environment detection
-IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production'
-SYSTEM_TYPE = platform.system().lower()
 
 @login_manager.user_loader
 def load_user(user_id):
