@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Website Generator</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #1e40af;
+            --background-color: #f8fafc;
+            --chat-bg: #ffffff;
+            --user-message-bg: #e0f2fe;
+            --ai-message-bg: #f1f5f9;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --sidebar-width: 280px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+
+        body {
+            background-color: var(--background-color);
+            color: var(--text-primary);
+            line-height: 1.5;
+        }
+
+        .app-container {
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: var(--sidebar-width);
+            background-color: white;
+            border-right: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        .sidebar-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-buttons {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .new-chat-btn {
+            padding: 0.5rem 1rem;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: background-color 0.2s;
+        }
+
+        .new-chat-btn:hover {
+            background-color: var(--secondary-color);
+        }
+
+        .get-prompts-btn {
+            padding: 0.5rem 1rem;
+            background-color: #22c55e;  /* Green color */
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: background-color 0.2s;
+        }
+
+        .get-prompts-btn:hover {
+            background-color: #16a34a;
+        }
+
+        .get-prompts-btn.loading {
+            opacity: 0.7;
+            cursor: wait;
+        }
+
+        .chat-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+        }
+
+        .chat-item {
+            padding: 0.75rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            color: var(--text-primary);
+            text-decoration: none;
+        }
+
+        .chat-item:hover {
+            background-color: var(--background-color);
+        }
+
+        .chat-item.active {
+            background-color: #e0f2fe;
+        }
+
+        .chat-item-icon {
+            margin-right: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .chat-item-content {
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .chat-item-title {
+            font-weight: 500;
+            margin-bottom: 0.25rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .chat-item-date {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .user-section {
+            padding: 1rem;
+            border-top: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+        }
+
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background-color: var(--primary-color);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 500;
+            margin-right: 0.75rem;
+        }
+
+        .logout-btn {
+            padding: 0.5rem;
+            color: var(--text-secondary);
+            background: none;
+            border: none;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .logout-btn:hover {
+            color: var(--text-primary);
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
+            overflow: hidden;
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--primary-color);
+            margin-bottom: 2rem;
+            font-size: 2rem;
+            font-weight: 600;
+        }
+
+        #chat_history {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 1rem;
+        }
+
+        .message {
+            margin: 1rem 0;
+            padding: 1rem;
+            border-radius: 8px;
+            max-width: 80%;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .user-message {
+            background-color: var(--user-message-bg);
+            margin-left: auto;
+            border-bottom-right-radius: 2px;
+        }
+
+        .ai-message {
+            background-color: var(--ai-message-bg);
+            margin-right: auto;
+            border-bottom-left-radius: 2px;
+        }
+
+        .message strong {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        form {
+            background: var(--chat-bg);
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            border: 1px solid #e2e8f0;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            resize: vertical;
+            min-height: 100px;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+            transition: border-color 0.2s ease;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: flex-end;
+        }
+
+        input[type="submit"],
+        .download-btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 1rem;
+        }
+
+        input[type="submit"] {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        input[type="submit"]:hover {
+            background-color: var(--secondary-color);
+        }
+
+        .download-btn {
+            background-color: #22c55e;
+            color: white;
+        }
+
+        .download-btn:hover {
+            background-color: #16a34a;
+        }
+
+        input[type="submit"]:disabled,
+        .download-btn:disabled {
+            background-color: var(--text-secondary);
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        /* Custom scrollbar */
+        #chat_history::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #chat_history::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        #chat_history::-webkit-scrollbar-thumb {
+            background: #c5c5c5;
+            border-radius: 4px;
+        }
+
+        #chat_history::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+
+        /* Loading animation */
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+
+        .loading {
+            animation: pulse 1.5s infinite;
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: -100%;
+                transition: left 0.3s ease;
+                z-index: 10;
+            }
+
+            .sidebar.active {
+                left: 0;
+            }
+
+            .menu-toggle {
+                display: block;
+                position: fixed;
+                top: 1rem;
+                left: 1rem;
+                z-index: 20;
+            }
+        }
+    </style>
+    <script>
+        let websiteTimer;
+        let statusCheckInterval;
+
+        function startWebsiteStatusCheck() {
+            // Clear any existing intervals
+            clearInterval(statusCheckInterval);
+            
+            // Add initial delay before starting to check
+            setTimeout(() => {
+                console.log("Starting website status check...");
+                
+                // Start checking every 2 seconds
+                statusCheckInterval = setInterval(() => {
+                    $.ajax({
+                        url: "{{ url_for('check_website_status') }}",
+                        type: "GET",
+                        success: function(response) {
+                            if (response.status === "ready") {
+                                // Double check that we're not seeing a stale port number
+                                setTimeout(() => {
+                                    $.ajax({
+                                        url: "{{ url_for('check_website_status') }}",
+                                        type: "GET",
+                                        success: function(secondCheck) {
+                                            if (secondCheck.status === "ready") {
+                                                clearInterval(statusCheckInterval);
+                                                $("#chat_history").append(`
+                                                    <div class="message ai-message">
+                                                        <strong>AI:</strong> Your website is now ready! You can send another message or download the website.
+                                                    </div>
+                                                `);
+                                                $("#chat_history").scrollTop($("#chat_history")[0].scrollHeight);
+                                                enableDownloadButton();
+                                            }
+                                        }
+                                    });
+                                }, 2000); // Wait 2 seconds before confirming
+                            }
+                        },
+                        error: function(xhr, status, error) {
+                            console.error("Error checking website status:", error);
+                        }
+                    });
+                }, 2000);  // Check every 2 seconds
+            }, 15000); // Wait 15 seconds before starting to check
+
+            // Set a timeout to stop checking after 45 seconds
+            setTimeout(() => {
+                clearInterval(statusCheckInterval);
+            }, 45000);
+        }
+
+        function startNewChat() {
+            window.location.href = "{{ url_for('index') }}";
+        }
+
+        function getMorePrompts() {
+            const button = document.querySelector('.get-prompts-btn');
+            button.classList.add('loading');
+            button.textContent = 'Creating Account...';
+            button.disabled = true;
+
+            $.ajax({
+                url: "{{ url_for('create_new_account') }}",
+                type: "POST",
+                success: function(response) {
+                    if (response.status === "success") {
+                        alert("New account created successfully! You can now use more prompts.");
+                        location.reload();  // Reload the page to use new account
+                    } else {
+                        alert(response.message);
+                    }
+                },
+                error: function() {
+                    alert("Failed to create new account. Please try again.");
+                },
+                complete: function() {
+                    button.classList.remove('loading');
+                    button.textContent = 'Get More Prompts';
+                    button.disabled = false;
+                }
+            });
+        }
+
+        $(document).ready(function() {
+            $("#messageForm").on("submit", function(e) {
+                e.preventDefault();
+                
+                const userMessage = $("#user_message").val();
+                const chatId = "{{ current_chat.id if current_chat else '' }}";
+                
+                if (!userMessage.trim()) {
+                    alert("Please enter a message");
+                    return;
+                }
+
+                // Clear any existing intervals when sending new message
+                clearInterval(statusCheckInterval);
+
+                // Add user message to chat immediately
+                $("#chat_history").append(`
+                    <div class="message user-message">
+                        <strong>You:</strong> ${userMessage}
+                    </div>
+                `);
+
+                // Scroll to bottom
+                $("#chat_history").scrollTop($("#chat_history")[0].scrollHeight);
+
+                // Disable form while processing
+                $("#messageForm :input").prop("disabled", true);
+
+                $.ajax({
+                    url: "{{ url_for('send_message') }}",
+                    type: "POST",
+                    data: {
+                        user_message: userMessage,
+                        chat_id: chatId
+                    },
+                    success: function(response) {
+                        if (response.status === "success") {
+                            $("#chat_history").append(`
+                                <div class="message ai-message">
+                                    <strong>AI:</strong> ${response.ai_response}
+                                </div>
+                            `);
+                            
+                            // Start checking for website status
+                            startWebsiteStatusCheck();
+                        } else {
+                            alert(response.message);
+                        }
+                        
+                        // Clear input and re-enable form
+                        $("#user_message").val("");
+                        $("#messageForm :input").prop("disabled", false);
+                        $("#chat_history").scrollTop($("#chat_history")[0].scrollHeight);
+                    },
+                    error: function(xhr, status, error) {
+                        alert("An error occurred: " + error);
+                        $("#messageForm :input").prop("disabled", false);
+                    }
+                });
+            });
+
+            // Add download button click handler
+            $("#downloadBtn").on("click", function() {
+                console.log("Download button clicked"); // Debug log
+                const button = $(this);
+                button.prop("disabled", true).text("Starting Download...");
+                
+                $.ajax({
+                    url: "{{ url_for('download_website') }}",
+                    type: "POST",
+                    success: function(response) {
+                        console.log("Download response:", response); // Debug log
+                        if (response.status === "success") {
+                            button.text("Downloading...");
+                            checkDownloadStatus();
+                        } else {
+                            button.prop("disabled", false).text("Download Website");
+                            alert("Error: " + response.message);
+                            console.error("Download error:", response);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error("Download ajax error:", error); // Debug log
+                        button.prop("disabled", false).text("Download Website");
+                        alert("Failed to start download. Please try again.");
+                    }
+                });
+            });
+        });
+
+        // Enable download button after first message
+        function enableDownloadButton() {
+            $("#downloadBtn").prop("disabled", false);
+        }
+
+        // Add this function to check download status
+        function checkDownloadStatus(attempts = 0) {
+            if (attempts >= 10) {  // Give up after 10 attempts
+                alert("Download may have failed. Please try again.");
+                $("#downloadBtn").prop("disabled", false).text("Download Website");
+                return;
+            }
+            
+            $.ajax({
+                url: "{{ url_for('check_download_status') }}",  // You'll need to create this endpoint
+                type: "GET",
+                success: function(response) {
+                    if (response.status === "completed") {
+                        $("#downloadBtn").prop("disabled", false).text("Download Website");
+                        alert("Download completed!");
+                    } else if (response.status === "in_progress") {
+                        setTimeout(() => checkDownloadStatus(attempts + 1), 1000);  // Check again in 1 second
+                    } else {
+                        $("#downloadBtn").prop("disabled", false).text("Download Website");
+                        alert("Download failed. Please try again.");
+                    }
+                },
+                error: function() {
+                    $("#downloadBtn").prop("disabled", false).text("Download Website");
+                    alert("Failed to check download status.");
+                }
+            });
+        }
+    </script>
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>Chats</h2>
+                <div class="header-buttons">
+                    <button class="new-chat-btn" onclick="startNewChat()">New Chat</button>
+                    <button class="get-prompts-btn" onclick="getMorePrompts()">Get More Prompts</button>
+                </div>
+            </div>
+            
+            <div class="chat-list">
+                {% for chat in chats %}
+                <a href="{{ url_for('view_chat', chat_id=chat.id) }}" 
+                   class="chat-item {% if chat.id == current_chat_id %}active{% endif %}">
+                    <div class="chat-item-icon">
+                        💬
+                    </div>
+                    <div class="chat-item-content">
+                        <div class="chat-item-title">{{ chat.title }}</div>
+                        <div class="chat-item-date">{{ chat.created_at.strftime('%B %d, %Y') }}</div>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+
+            <div class="user-section">
+                <div class="user-info">
+                    <div class="user-avatar">
+                        {{ current_user.username[0].upper() }}
+                    </div>
+                    <span>{{ current_user.username }}</span>
+                </div>
+                <a href="{{ url_for('logout') }}" class="logout-btn">
+                    Logout
+                </a>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div class="chat-container">
+                <div id="chat_history">
+                    {% if current_chat %}
+                        {% for message in messages %}
+                            <div class="message {% if message.is_user %}user-message{% else %}ai-message{% endif %}">
+                                <strong>{% if message.is_user %}You{% else %}AI{% endif %}:</strong>
+                                {{ message.content }}
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                </div>
+                
+                <form id="messageForm" method="POST">
+                    <label for="user_message">Message:</label>
+                    <textarea 
+                        id="user_message" 
+                        name="user_message" 
+                        placeholder="Describe the website you want to create..."
+                    ></textarea>
+                    <div class="action-buttons">
+                        <input type="submit" value="Send Message">
+                        <button type="button" id="downloadBtn" class="download-btn" disabled>
+                            Download Website
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </main>
+    </div>
+</body>
+</html>
