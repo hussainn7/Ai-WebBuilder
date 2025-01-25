@@ -4,7 +4,7 @@ set -o errexit
 
 # Install system dependencies
 apt-get update
-apt-get install -y wget unzip
+apt-get install -y wget unzip postgresql postgresql-contrib libpq-dev python3-dev
 
 # Install Chrome and ChromeDriver
 wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
@@ -17,6 +17,10 @@ CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATE
 curl -Lo /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/$CHROMEDRIVER_VERSION/chromedriver_linux64.zip"
 unzip -q /tmp/chromedriver.zip -d /usr/local/bin/
 chmod +x /usr/local/bin/chromedriver
+
+# Upgrade pip and install psycopg2 binary first
+pip install --upgrade pip
+pip install psycopg2-binary
 
 # Install Python dependencies
 pip install -r requirements.txt
