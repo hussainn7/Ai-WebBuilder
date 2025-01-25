@@ -18,7 +18,7 @@ pip install -r requirements.txt
 
 # Initialize database
 python << END
-from flask-kwork import app, db
+from app import app, db
 with app.app_context():
     db.create_all()
 END 
