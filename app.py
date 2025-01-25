@@ -56,22 +56,33 @@ def load_user(user_id):
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
+        app.logger.info("User already authenticated")
         return redirect(url_for('index'))
     
     if request.method == 'POST':
         try:
             username = request.form.get('username')
             password = request.form.get('password')
+            app.logger.info(f"Login attempt for username: {username}")
+            
             user = User.query.filter_by(username=username).first()
+            app.logger.info(f"User found: {user is not None}")
             
             if user and user.check_password(password):
+                app.logger.info("Password check passed")
                 login_user(user)
+                app.logger.info("User logged in successfully")
                 return redirect(url_for('index'))
             else:
-                return render_template('login.html', error='Invalid username or password')
+                app.logger.warning("Invalid login attempt")
+                if not user:
+                    error = 'User not found'
+                else:
+                    error = 'Invalid password'
+                return render_template('login.html', error=error)
         except Exception as e:
-            app.logger.error(f"Login error: {str(e)}")
-            return render_template('login.html', error='An error occurred during login')
+            app.logger.error(f"Login error: {str(e)}", exc_info=True)
+            return render_template('login.html', error=f'Login error: {str(e)}')
     
     return render_template('login.html')
 
@@ -623,20 +634,47 @@ def health_check_alt():
             "timestamp": datetime.now().isoformat()
         }), 500
 
-# Add this route for initial database setup
+# Add this route to check database status
+@app.route('/db_status')
+def db_status():
+    try:
+        # Try to query users
+        users = User.query.all()
+        user_count = len(users)
+        return jsonify({
+            'status': 'connected',
+            'user_count': user_count,
+            'users': [user.username for user in users]
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+# Update init_db route with more details
 @app.route('/init_db')
 def init_database():
     try:
         with app.app_context():
             db.create_all()
-            # Create a default admin user if it doesn't exist
-            if not User.query.filter_by(username='admin').first():
+            app.logger.info("Tables created successfully")
+            
+            # Check if admin user exists
+            admin = User.query.filter_by(username='admin').first()
+            if not admin:
                 admin = User(username='admin')
-                admin.set_password('admin123')  # Change this password!
+                admin.set_password('admin123')
                 db.session.add(admin)
                 db.session.commit()
-        return 'Database initialized successfully!'
+                app.logger.info("Admin user created successfully")
+                return 'Database initialized and admin user created successfully!'
+            else:
+                app.logger.info("Admin user already exists")
+                return 'Database already initialized with admin user!'
+                
     except Exception as e:
+        app.logger.error(f"Database initialization error: {str(e)}", exc_info=True)
         return f'Error initializing database: {str(e)}'
 
 # Create database tables
