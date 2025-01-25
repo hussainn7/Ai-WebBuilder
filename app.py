@@ -22,9 +22,14 @@ from datetime import datetime
 IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production'
 SYSTEM_TYPE = platform.system().lower()
 
+# Database configuration
+database_url = os.environ.get('DATABASE_URL')
+if database_url and database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL')
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Add this fix for Render's DATABASE_URL
@@ -681,6 +686,39 @@ def init_database():
 def init_db():
     with app.app_context():
         db.create_all()
+
+# Add this to debug the connection
+@app.route('/db_info')
+def db_info():
+    try:
+        # Test connection
+        db.session.execute('SELECT 1')
+        return jsonify({
+            'status': 'connected',
+            'database_url': database_url.split('@')[1] if database_url else 'Not set',
+            'tables': db.engine.table_names()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+@app.before_first_request
+def initialize_database():
+    try:
+        # Create tables
+        db.create_all()
+        
+        # Create admin user if it doesn't exist
+        if not User.query.filter_by(username='admin').first():
+            admin = User(username='admin')
+            admin.set_password('admin123')
+            db.session.add(admin)
+            db.session.commit()
+            app.logger.info("Created admin user")
+    except Exception as e:
+        app.logger.error(f"Database initialization error: {str(e)}")
 
 if __name__ == '__main__':
     # Create necessary directories
