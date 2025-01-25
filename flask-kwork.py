@@ -589,10 +589,36 @@ def cleanup_old_sessions():
             pass
         current_driver = None
 
-# Add health check endpoint
-@app.route('/health')
+# Add both health check endpoints for different conventions
+@app.route("/healthz")
 def health_check():
-    return jsonify({"status": "healthy"})
+    return "OK", 200
+
+@app.route("/health")
+def health_check_alt():
+    try:
+        # Check database connection
+        db.session.execute('SELECT 1')
+        
+        # Check if Chrome/Selenium is available
+        chrome_options = init_chrome_options()
+        service = Service(get_chromedriver_path())
+        test_driver = webdriver.Chrome(service=service, options=chrome_options)
+        test_driver.quit()
+        
+        return jsonify({
+            "status": "healthy",
+            "database": "connected",
+            "selenium": "available",
+            "timestamp": datetime.now().isoformat()
+        }), 200
+    except Exception as e:
+        logging.error(f"Health check failed: {str(e)}")
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
 
 # Create database tables
 def init_db():

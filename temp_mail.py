@@ -10,6 +10,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import hashlib
 from bs4 import BeautifulSoup
 import json
+import os
 
 # Temp Mail API settings
 API_KEY = "7e3bfe9144msh9f122e5631c0f45p142244jsn448f2b50a171"
@@ -93,57 +94,71 @@ def wait_for_email(email_address):
         time.sleep(6)
     return None
 
-def perform_registration_and_verify(email):
-    service = Service(DRIVER_PATH)
+def init_chrome_options():
     chrome_options = Options()
+    # Always use headless for production
+    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--window-size=1920,1080')
+    
+    if os.environ.get('FLASK_ENV') == 'production':
+        chrome_options.binary_location = os.environ.get('GOOGLE_CHROME_BIN')
+    
+    return chrome_options
 
-    # Initialize WebDriver
-    driver = webdriver.Chrome(service=service, options=chrome_options)
+def perform_registration_and_verify(email):
     try:
-        # Open registration page
-        driver.get("https://stackblitz.com/register")
+        chrome_options = init_chrome_options()
+        service = Service(DRIVER_PATH)
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        try:
+            # Open registration page
+            driver.get("https://stackblitz.com/register")
 
-        wait = WebDriverWait(driver, 15)
-        email_field = wait.until(EC.presence_of_element_located((By.NAME, "email")))
+            wait = WebDriverWait(driver, 15)
+            email_field = wait.until(EC.presence_of_element_located((By.NAME, "email")))
 
-        username_field = wait.until(EC.presence_of_element_located((By.NAME, "username")))
+            username_field = wait.until(EC.presence_of_element_located((By.NAME, "username")))
 
-        password_field = wait.until(EC.presence_of_element_located((By.NAME, "password")))
+            password_field = wait.until(EC.presence_of_element_located((By.NAME, "password")))
 
-        password_confirm_field = wait.until(EC.presence_of_element_located((By.NAME, "password-confirm")))
+            password_confirm_field = wait.until(EC.presence_of_element_located((By.NAME, "password-confirm")))
 
-        sign_up_button = wait.until(EC.presence_of_element_located(
-            (By.XPATH, "/html/body/div/div/div[2]/div/div/div/main/div[2]/div/div/form/button")))
+            sign_up_button = wait.until(EC.presence_of_element_located(
+                (By.XPATH, "/html/body/div/div/div[2]/div/div/div/main/div[2]/div/div/form/button")))
 
-        username = "user" + str(int(time.time()))  # Generate a unique username
-        password = "Parol786!"
+            username = "user" + str(int(time.time()))  # Generate a unique username
+            password = "Parol786!"
 
-        email_field.send_keys(email)
-        username_field.send_keys(username)
-        password_field.send_keys(password)
-        password_confirm_field.send_keys(password)
-        sign_up_button.click()
-        print(f"Registration submitted with Email: {email}, Username: {username}, and Password: {password}")
+            email_field.send_keys(email)
+            username_field.send_keys(username)
+            password_field.send_keys(password)
+            password_confirm_field.send_keys(password)
+            sign_up_button.click()
+            print(f"Registration submitted with Email: {email}, Username: {username}, and Password: {password}")
 
-        # Wait for email verification link
-        confirmation_link = wait_for_email(email)
-        if confirmation_link:
-            print(f"Confirmation link found: {confirmation_link}")
-            print("Opening confirmation link in the same browser window...")
+            # Wait for email verification link
+            confirmation_link = wait_for_email(email)
+            if confirmation_link:
+                print(f"Confirmation link found: {confirmation_link}")
+                print("Opening confirmation link in the same browser window...")
 
-            driver.get(confirmation_link)  # Open the confirmation link in the same window
-            print("Confirmation link opened successfully.")
+                driver.get(confirmation_link)  # Open the confirmation link in the same window
+                print("Confirmation link opened successfully.")
 
-            # Save account details after successful confirmation
-            save_account_details(email, username, password)
+                # Save account details after successful confirmation
+                save_account_details(email, username, password)
 
-        else:
-            print("Failed to find the confirmation link in the email.")
+            else:
+                print("Failed to find the confirmation link in the email.")
+        except Exception as e:
+            print(f"An error occurred: {e}")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"Error initializing Chrome options: {e}")
     finally:
         driver.quit()
-
 
 def main():
     temp_email = get_temp_email()
