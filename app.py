@@ -62,39 +62,47 @@ def load_user(user_id):
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('index'))
-        
+    
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        user = User.query.filter_by(username=username).first()
-        
-        if user and user.check_password(password):
-            login_user(user)
-            return redirect(url_for('index'))
-        
-        flash('Invalid username or password')
+        try:
+            username = request.form.get('username')
+            password = request.form.get('password')
+            user = User.query.filter_by(username=username).first()
+            
+            if user and user.check_password(password):
+                login_user(user)
+                return redirect(url_for('index'))
+            else:
+                return render_template('login.html', error='Invalid username or password')
+        except Exception as e:
+            app.logger.error(f"Login error: {str(e)}")
+            return render_template('login.html', error='An error occurred during login')
+    
     return render_template('login.html')
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if current_user.is_authenticated:
         return redirect(url_for('index'))
-        
+    
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        if User.query.filter_by(username=username).first():
-            flash('Username already exists')
-            return redirect(url_for('register'))
-        
-        user = User(username=username)
-        user.set_password(password)
-        db.session.add(user)
-        db.session.commit()
-        
-        login_user(user)
-        return redirect(url_for('index'))
+        try:
+            username = request.form.get('username')
+            password = request.form.get('password')
+            
+            if User.query.filter_by(username=username).first():
+                return render_template('register.html', error='Username already exists')
+            
+            user = User(username=username)
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+            
+            login_user(user)
+            return redirect(url_for('index'))
+        except Exception as e:
+            app.logger.error(f"Registration error: {str(e)}")
+            return render_template('register.html', error='An error occurred during registration')
     
     return render_template('register.html')
 
@@ -619,6 +627,22 @@ def health_check_alt():
             "error": str(e),
             "timestamp": datetime.now().isoformat()
         }), 500
+
+# Add this route for initial database setup
+@app.route('/init_db')
+def init_database():
+    try:
+        with app.app_context():
+            db.create_all()
+            # Create a default admin user if it doesn't exist
+            if not User.query.filter_by(username='admin').first():
+                admin = User(username='admin')
+                admin.set_password('admin123')  # Change this password!
+                db.session.add(admin)
+                db.session.commit()
+        return 'Database initialized successfully!'
+    except Exception as e:
+        return f'Error initializing database: {str(e)}'
 
 # Create database tables
 def init_db():
