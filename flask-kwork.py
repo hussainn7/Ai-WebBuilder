@@ -14,11 +14,25 @@ import os
 import time
 from temp_mail import get_temp_email, perform_registration_and_verify  # Import from your existing script
 from pathlib import Path
+import platform
+import logging
+from datetime import datetime
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change this to a secure secret key
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///chat_history.db'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+    'DATABASE_URL', 
+    'postgresql://postgres:password@localhost:5432/aiwebbuilder'  # Local development fallback
+    if IS_PRODUCTION else 
+    'sqlite:///chat_history.db'  # SQLite for local testing
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Add this fix for Render's DATABASE_URL
+if app.config['SQLALCHEMY_DATABASE_URI'].startswith("postgres://"):
+    app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace(
+        "postgres://", "postgresql://", 1
+    )
 
 # Initialize extensions
 db.init_app(app)
@@ -27,6 +41,17 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 
 current_driver = None
+
+# Set up logging
+logging.basicConfig(
+    filename='app.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+# Environment detection
+IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production'
+SYSTEM_TYPE = platform.system().lower()
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -129,16 +154,26 @@ chrome_options = Options()
 
 def init_chrome_options():
     chrome_options = Options()
+    
+    # Production-specific options
+    if IS_PRODUCTION:
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.binary_location = os.environ.get('GOOGLE_CHROME_BIN')
+    
     chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1920,1080')
     
-    # Create downloads directory if it doesn't exist
-    download_dir = os.path.join(os.path.expanduser('~'), 'Downloads', 'website_downloads')
+    # Create downloads directory based on environment
+    if IS_PRODUCTION:
+        download_dir = '/tmp/website_downloads'
+    else:
+        download_dir = os.path.join(os.path.expanduser('~'), 'Downloads', 'website_downloads')
+    
     Path(download_dir).mkdir(parents=True, exist_ok=True)
     
-    # Add download preferences with more permissions
+    # Add download preferences
     chrome_options.add_experimental_option(
         'prefs', {
             'download.default_directory': download_dir,
@@ -146,17 +181,22 @@ def init_chrome_options():
             'download.directory_upgrade': True,
             'safebrowsing.enabled': True,
             'profile.default_content_settings.popups': 0,
-            'profile.default_content_setting_values.automatic_downloads': 1,
-            'profile.content_settings.exceptions.automatic_downloads.*.setting': 1
+            'profile.default_content_setting_values.automatic_downloads': 1
         }
     )
     
-    # Add additional permissions
-    chrome_options.add_argument('--allow-file-access-from-files')
-    chrome_options.add_argument('--allow-file-access')
-    chrome_options.add_argument('--allow-cross-origin-auth-prompt')
-    
     return chrome_options
+
+def get_chromedriver_path():
+    if IS_PRODUCTION:
+        return os.environ.get('CHROMEDRIVER_PATH', '/usr/local/bin/chromedriver')
+    
+    if SYSTEM_TYPE == 'windows':
+        return r'C:\Users\Hussain\Downloads\ChromeDriver\chromedriver.exe'
+    elif SYSTEM_TYPE == 'darwin':  # macOS
+        return '/usr/local/bin/chromedriver'
+    else:  # Linux
+        return '/usr/local/bin/chromedriver'
 
 def load_account_details():
     try:
@@ -254,15 +294,15 @@ def start_task():
 @login_required
 def send_message():
     global current_driver
-    user_message = request.form['user_message']
-    chat_id = request.form.get('chat_id')
-    
     try:
+        user_message = request.form['user_message']
+        chat_id = request.form.get('chat_id')
+        
         if not current_driver:
             print("Initializing new Chrome driver...")
             # Initialize Chrome driver without headless for download support
             chrome_options = init_chrome_options()
-            service = Service(r'C:\Users\Hussain\Downloads\ChromeDriver\chromedriver.exe')
+            service = Service(get_chromedriver_path())
             current_driver = webdriver.Chrome(service=service, options=chrome_options)
             current_driver.get("https://stackblitz.com/sign_in")
             print("On login page")
@@ -345,6 +385,9 @@ def send_message():
             db.session.add(ai_message)
             db.session.commit()
             
+            if current_driver:
+                current_driver.last_used = datetime.now()
+            
             return jsonify({
                 "status": "success",
                 "message": "Message sent!",
@@ -369,11 +412,10 @@ def send_message():
             })
         
     except Exception as e:
-        print(f"Error in send_message: {e}")
+        logging.error(f"Error in send_message: {str(e)}", exc_info=True)
         return jsonify({
             "status": "error",
-            "message": str(e),
-            "ai_response": "An error occurred while processing your request. Please try again."
+            "message": "Failed to process message. Please try again."
         })
 
 @app.route('/download_website', methods=['POST'])
@@ -536,11 +578,43 @@ def check_website_status():
         print(f"Error checking website status: {e}")
         return jsonify({"status": "error", "message": str(e)})
 
+# Add session cleanup
+@app.before_request
+def cleanup_old_sessions():
+    global current_driver
+    if current_driver and (datetime.now() - getattr(current_driver, 'last_used', datetime.now())).seconds > 3600:
+        try:
+            current_driver.quit()
+        except:
+            pass
+        current_driver = None
+
+# Add health check endpoint
+@app.route('/health')
+def health_check():
+    return jsonify({"status": "healthy"})
+
 # Create database tables
 def init_db():
     with app.app_context():
         db.create_all()
 
 if __name__ == '__main__':
-    init_db()  # Initialize database tables
-    app.run(debug=True)
+    # Create necessary directories
+    Path('logs').mkdir(exist_ok=True)
+    
+    # Initialize database
+    with app.app_context():
+        try:
+            db.create_all()
+        except Exception as e:
+            logging.error(f"Database initialization failed: {str(e)}", exc_info=True)
+            raise
+    
+    # Start server
+    port = int(os.environ.get('PORT', 5000))
+    if IS_PRODUCTION:
+        from waitress import serve
+        serve(app, host='0.0.0.0', port=port)
+    else:
+        app.run(debug=True, port=port)
