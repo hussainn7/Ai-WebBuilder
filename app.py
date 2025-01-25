@@ -720,6 +720,39 @@ def initialize_database():
     except Exception as e:
         app.logger.error(f"Database initialization error: {str(e)}")
 
+@app.route('/test_db')
+def test_db():
+    try:
+        # Test basic connection
+        db.session.execute('SELECT 1')
+        
+        # Create tables if they don't exist
+        db.create_all()
+        
+        # Try to create admin user
+        if not User.query.filter_by(username='admin').first():
+            admin = User(username='admin')
+            admin.set_password('admin123')
+            db.session.add(admin)
+            db.session.commit()
+            return jsonify({
+                'status': 'success',
+                'message': 'Database connected and admin user created',
+                'tables': db.engine.table_names()
+            })
+        else:
+            return jsonify({
+                'status': 'success',
+                'message': 'Database connected, admin user already exists',
+                'tables': db.engine.table_names()
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
 if __name__ == '__main__':
     # Create necessary directories
     Path('logs').mkdir(exist_ok=True)
