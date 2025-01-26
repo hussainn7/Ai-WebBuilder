@@ -37,12 +37,19 @@ login_manager.login_view = 'login'
 
 current_driver = None
 
+
+def init_db():
+    with app.app_context():
+        db.create_all()
+
 # Set up logging
 logging.basicConfig(
     filename='app.log',
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
+
+
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -126,10 +133,21 @@ def home():
 @login_required
 def index():
     try:
-        chats = Chat.query.filter_by(user_id=current_user.id).all()
+        user_id = current_user.id
+        logging.info(f"Fetching chats for user ID: {user_id})")
+        
+        # Fetch chats for the current user
+        chats = Chat.query.filter_by(user_id=user_id).all()
+        
+        if not chats:
+            logging.info("No chats found for the user.")
+            return jsonify({"status": "success", "message": "No chats found", "chats": []})
+        
+        logging.info(f"Found {len(chats)} chats for the user.")
         return render_template('index.html', chats=chats)
+    
     except Exception as e:
-        logging.error(f"Error fetching chats: {str(e)}")
+        logging.error(f"Error fetching chats: {str(e)}", exc_info=True)
         return jsonify({"status": "error", "message": "Failed to fetch chats"}), 500
 
 @app.route('/chat/<int:chat_id>')
@@ -146,7 +164,7 @@ service = Service(driver_path)
 def init_chrome_options():
     chrome_options = Options()
     chrome_options.add_argument('--headless')  # Run in headless mode
-    chrome_options.add_argument('--no-sandbox')
+    # chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--disable-gpu')
     chrome_options.add_argument('--window-size=1920,1080')
@@ -458,4 +476,5 @@ with app.app_context():
     db.create_all()  # This should be called when the app starts
 
 if __name__ == '__main__':
+    init_db()
     app.run(debug=True)

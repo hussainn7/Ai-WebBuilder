@@ -24,15 +24,23 @@ RUN wget -N https://chromedriver.storage.googleapis.com/114.0.5735.90/chromedriv
     && chmod +x /usr/local/bin/chromedriver \
     && rm chromedriver_linux64.zip
 
+# Create a non-root user and set permissions
+RUN useradd -m myuser \
+    && mkdir -p /app \
+    && chown -R myuser:myuser /app
+
 # Set the working directory
 WORKDIR /app
 
 # Copy requirements and install
-COPY requirements.txt .
+COPY --chown=myuser:myuser requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application
-COPY . .
+COPY --chown=myuser:myuser . .
+
+# Switch to the non-root user
+USER myuser
 
 # Command to run the application
 CMD ["gunicorn", "-b", ":$PORT", "flask-kwork:app"]
