@@ -640,6 +640,7 @@
                         name="user_message" 
                         placeholder="Describe the website you want to create..."
                     ></textarea>
+                    <input type="hidden" name="chat_id" value="{{ chat.id }}">
                     <div class="action-buttons">
                         <input type="submit" value="Send Message">
                         <button type="button" id="downloadBtn" class="download-btn" disabled>

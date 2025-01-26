@@ -143,9 +143,8 @@ def view_chat(chat_id):
     return render_template('chat.html', chat=chat, messages=messages)
 
 # Initialize driver path and options
-driver_path = r'C:\Users\Hussain\Downloads\ChromeDriver\chromedriver.exe'
+driver_path = '/usr/local/bin/chromedriver'  # Update this to your actual path
 service = Service(driver_path)
-chrome_options = Options()
 
 def init_chrome_options():
     chrome_options = Options()
@@ -179,6 +178,8 @@ def init_chrome_options():
     
     return chrome_options
 
+chrome_options = init_chrome_options()  # Initialize options
+
 def load_account_details():
     try:
         with open("accounts.json", "r") as file:
@@ -198,7 +199,11 @@ def automate_task(user_message):
     password = account["password"]
 
     chrome_options = init_chrome_options()
-    driver = webdriver.Chrome(service=service, options=chrome_options)
+    try:
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+    except Exception as e:
+        logging.error(f"Failed to initialize WebDriver: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to initialize WebDriver"})
     driver.get("https://stackblitz.com/sign_in")
     print('on link')
     try:
