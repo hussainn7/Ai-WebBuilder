@@ -125,15 +125,12 @@ def home():
 @app.route('/chat')
 @login_required
 def index():
-    chats = Chat.query.filter_by(user_id=current_user.id)\
-        .order_by(Chat.created_at.desc())\
-        .limit(20)\
-        .all()
-    return render_template('index.html', 
-                         chats=chats,
-                         current_chat=None,
-                         current_chat_id=None,
-                         messages=[])
+    try:
+        chats = Chat.query.filter_by(user_id=current_user.id).all()
+        return render_template('index.html', chats=chats)
+    except Exception as e:
+        logging.error(f"Error fetching chats: {str(e)}")
+        return jsonify({"status": "error", "message": "Failed to fetch chats"}), 500
 
 @app.route('/chat/<int:chat_id>')
 @login_required
