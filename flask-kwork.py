@@ -17,6 +17,7 @@ from pathlib import Path
 import platform
 import logging
 from datetime import datetime
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # Environment and system configuration
 IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production'
@@ -63,15 +64,19 @@ def login():
             user = User.query.filter_by(username=username).first()
             app.logger.info(f"User found: {user is not None}")
             
-            if user and user.check_password(password):
-                app.logger.info("Password check passed")
-                login_user(user)
-                app.logger.info("User logged in successfully")
-                return redirect(url_for('index'))
+            if user:
+                app.logger.info("User found, checking password.")
+                if user.check_password(password):
+                    app.logger.info("Password check passed.")
+                    login_user(user)
+                    return redirect(url_for('index'))
+                else:
+                    app.logger.warning("Invalid password.")
             else:
-                app.logger.warning("Invalid login attempt")
-                error = 'Invalid username or password'
-                return render_template('login.html', error=error)
+                app.logger.warning("User not found.")
+            
+            error = 'Invalid username or password'
+            return render_template('login.html', error=error)
         except Exception as e:
             app.logger.error(f"Login error: {str(e)}", exc_info=True)
             return render_template('login.html', error=f'Login error: {str(e)}')
@@ -160,10 +165,10 @@ chrome_options = Options()
 
 def init_chrome_options():
     chrome_options = Options()
-    # chrome_options.add_argument('--headless')
-    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--headless')  # Run in headless mode
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--disable-gpu')
     chrome_options.add_argument('--window-size=1920,1080')
     
     # Create downloads directory if it doesn't exist
