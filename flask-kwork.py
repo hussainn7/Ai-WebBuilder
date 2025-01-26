@@ -133,25 +133,20 @@ def home():
 @login_required
 def index():
     try:
-        user_id = current_user.id
-        logging.info(f"Fetching chats for user ID: {user_id}")
-
         # Fetch chats for the current user
-        chats = Chat.query.filter_by(user_id=user_id).all()
+        chats = Chat.query.filter_by(user_id=current_user.id).all()
 
         if not chats:
-            logging.info("No chats found for the user.")
-            return jsonify({"status": "success", "message": "No chats found", "chats": []})
+            logging.info("No chats found for the user. Creating a new chat.")
+            # Create a new chat for the user
+            new_chat = Chat(user_id=current_user.id, title="New Chat")  # You can customize the title
+            db.session.add(new_chat)
+            db.session.commit()
+            chats.append(new_chat)  # Add the newly created chat to the list
 
-        logging.info(f"Found {len(chats)} chats for the user.")
-        return jsonify({
-            "status": "success",
-            "message": "Chats fetched successfully",
-            "chats": [{"id": chat.id, "title": chat.title} for chat in chats]
-        })
-
+        return render_template('index.html', chats=chats)
     except Exception as e:
-        logging.error(f"Error fetching chats: {str(e)}", exc_info=True)
+        logging.error(f"Error fetching chats: {str(e)}")
         return jsonify({"status": "error", "message": "Failed to fetch chats"}), 500
 
 @app.route('/chat/<int:chat_id>')
