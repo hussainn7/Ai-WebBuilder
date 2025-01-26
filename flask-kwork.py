@@ -139,24 +139,8 @@ def index():
 @login_required
 def view_chat(chat_id):
     chat = Chat.query.get_or_404(chat_id)
-    if chat.user_id != current_user.id:
-        return redirect(url_for('index'))
-    
-    messages = Message.query.filter_by(chat_id=chat_id)\
-        .order_by(Message.timestamp.desc())\
-        .limit(50)\
-        .all()
-    
-    chats = Chat.query.filter_by(user_id=current_user.id)\
-        .order_by(Chat.created_at.desc())\
-        .limit(20)\
-        .all()
-    
-    return render_template('index.html', 
-                         current_chat=chat, 
-                         current_chat_id=chat_id,
-                         messages=messages[::-1],
-                         chats=chats)
+    messages = Message.query.filter_by(chat_id=chat_id).all()
+    return render_template('chat.html', chat=chat, messages=messages)
 
 # Initialize driver path and options
 driver_path = r'C:\Users\Hussain\Downloads\ChromeDriver\chromedriver.exe'
@@ -293,7 +277,7 @@ def send_message():
     user_message = request.form.get('user_message')
     chat_id = request.form.get('chat_id')
 
-    logging.info(f"User Message: {user_message}, Chat ID: {chat_id}")  # Use logging instead of print
+    logging.info(f"Received User Message: {user_message}, Chat ID: {chat_id}")  # Log received data
 
     if not user_message or not chat_id:
         logging.error("Missing message or chat ID")
