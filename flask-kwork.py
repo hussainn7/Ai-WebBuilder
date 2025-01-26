@@ -133,16 +133,16 @@ def home():
 @login_required
 def index():
     try:
-        # Fetch chats for the current user
+        logging.info(f"Fetching chats for user ID: {current_user.id}")
         chats = Chat.query.filter_by(user_id=current_user.id).all()
+        logging.info(f"Chats fetched: {len(chats)} found.")
 
         if not chats:
             logging.info("No chats found for the user. Creating a new chat.")
-            # Create a new chat for the user
-            new_chat = Chat(user_id=current_user.id, title="New Chat")  # You can customize the title
+            new_chat = Chat(user_id=current_user.id, title="New Chat")
             db.session.add(new_chat)
             db.session.commit()
-            chats.append(new_chat)  # Add the newly created chat to the list
+            chats.append(new_chat)
 
         return render_template('index.html', chats=chats)
     except Exception as e:
@@ -500,7 +500,7 @@ def create_chat():
 
 # Create database tables
 with app.app_context():
-    db.create_all()  # This should be called when the app starts
+    db.create_all()  # This should create the tables if they don't exist
 
 if __name__ == '__main__':
     init_db()
