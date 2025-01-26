@@ -133,26 +133,30 @@ def home():
 @login_required
 def index():
     try:
+        # Ensure the user is authenticated
         if not current_user or not current_user.is_authenticated:
             logging.error("User is not authenticated")
             return jsonify({"status": "error", "message": "User not authenticated"}), 401
 
+        # Fetch chats for the user
         logging.info(f"Fetching chats for user ID: {current_user.id}")
         chats = Chat.query.filter_by(user_id=current_user.id).all()
 
-        logging.info(f"Chats fetched: {len(chats)}")
         if not chats:
             logging.info("No chats found. Creating a new chat.")
+            # Define and create a new chat if none exists
             new_chat = Chat(user_id=current_user.id, title="New Chat")
             db.session.add(new_chat)
             db.session.commit()
-            chats.append(new_chat)
+            chats.append(new_chat)  # Append the newly created chat to the chats list
+            logging.info(f"New chat created: {new_chat.id}")
 
         return render_template('index.html', chats=chats)
 
     except Exception as e:
         logging.error(f"Error in /chat route: {str(e)}", exc_info=True)
         return jsonify({"status": "error", "message": f"Failed to fetch chats: {str(e)}"}), 500
+
 
 
 
@@ -310,20 +314,24 @@ def send_message():
         if not user_message:
             return jsonify({"status": "error", "message": "Message is required"}), 400
 
-        # If no chat_id is provided, create a new chat
+        # Validate or create chat
         if not chat_id:
+            logging.info("No chat ID provided. Creating a new chat.")
             chat = Chat(user_id=current_user.id, title="New Chat")
             db.session.add(chat)
             db.session.commit()
             chat_id = chat.id
-            logging.info(f"Created new chat with ID: {chat_id}")
+        else:
+            chat = Chat.query.get(chat_id)
+            if not chat:
+                return jsonify({"status": "error", "message": "Chat not found"}), 404
 
         # Save the message to the database
         message = Message(content=user_message, is_user=True, chat_id=chat_id)
         db.session.add(message)
         db.session.commit()
 
-        logging.info("Message sent successfully!")
+        logging.info(f"Message sent successfully to chat ID: {chat_id}")
         return jsonify({
             "status": "success",
             "message": "Message sent!",
@@ -332,7 +340,8 @@ def send_message():
 
     except Exception as e:
         logging.error(f"Error sending message: {str(e)}", exc_info=True)
-        return jsonify({"status": "error", "message": "Failed to send message"}), 500
+        return jsonify({"status": "error", "message": f"Failed to send message: {str(e)}"}), 500
+
 
 @app.route('/download_website', methods=['POST'])
 def download_website():
