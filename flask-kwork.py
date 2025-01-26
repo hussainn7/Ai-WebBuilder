@@ -290,127 +290,22 @@ def start_task():
 @app.route('/send_message', methods=['POST'])
 @login_required
 def send_message():
-    global current_driver
-    try:
-        user_message = request.form['user_message']
-        chat_id = request.form.get('chat_id')
-        
-        if not current_driver:
-            print("Initializing new Chrome driver...")
-            # Initialize Chrome driver without headless for download support
-            chrome_options = init_chrome_options()
-            service = Service(r'C:\Users\Hussain\Downloads\ChromeDriver\chromedriver.exe')
-            current_driver = webdriver.Chrome(service=service, options=chrome_options)
-            current_driver.get("https://stackblitz.com/sign_in")
-            print("On login page")
-            
-            # Login process
-            wait = WebDriverWait(current_driver, 15)
-            email_field = wait.until(EC.presence_of_element_located((By.NAME, "login")))
-            password_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='password']")))
-            
-            # Load credentials from accounts.json
-            account = load_account_details()
-            if not account:
-                return jsonify({"status": "error", "message": "No account credentials found"})
-            
-            print("Entering credentials...")
-            email_field.send_keys(account["email"])
-            password_field.send_keys(account["password"])
-            password_field.send_keys(Keys.RETURN)
-            time.sleep(2)  # Increased wait time
-            
-            print("Navigating to Bolt...")
-            # Navigate to Bolt
-            current_driver.get("https://bolt.new/?utm_campaign=stackblitz-on-page&utm_source=web-app&utm_medium=nav-button")
-            time.sleep(2)  # Increased wait time
+    user_message = request.form.get('user_message')
+    chat_id = request.form.get('chat_id')
 
-            print("Looking for sign-in button...")
-            # Click the sign-in button if available
-            try:
-                sign_in_button = wait.until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "button.flex.rounded-md.items-center.justify-center"))
-                )
-                print("Sign-in button found and ready to click.")
-                sign_in_button.click()
-                print("Sign-in button clicked")
-            except Exception as e:
-                print(f"Button click failed or issue: {e}")
+    logging.info(f"User Message: {user_message}, Chat ID: {chat_id}")  # Use logging instead of print
 
-            time.sleep(3)  # Increased wait time
+    if not user_message or not chat_id:
+        logging.error("Missing message or chat ID")
+        return jsonify({"status": "error", "message": "Missing message or chat ID"})
 
-        print("Looking for textarea...")
-        # First check if textarea is interactable
-        wait = WebDriverWait(current_driver, 15)
-        try:
-            textarea = wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "textarea.w-full.pl-4.pt-4.pr-16"))
-            )
-            
-            # If textarea exists but is disabled, it means no prompts
-            if not textarea.is_enabled():
-                print("Textarea is disabled - no prompts available")
-                return jsonify({
-                    "status": "error",
-                    "message": "No prompts available",
-                    "ai_response": "Not working right now, wait a bit or create a new account"
-                })
-            
-            print("Sending message...")
-            # If we get here, textarea is enabled and we can send the message
-            textarea.clear()
-            textarea.send_keys(user_message)
-            textarea.send_keys(Keys.RETURN)
-            print("Message sent successfully!")
-            
-            # Save user message
-            message = Message(content=user_message, is_user=True, chat_id=chat_id)
-            db.session.add(message)
-            db.session.commit()
-            
-            # Look for the last message in the chat
-            messages = current_driver.find_elements(By.CSS_SELECTOR, ".message-list .message")
-            if messages:
-                ai_response = messages[-1].text  # Get the last message
-                print(f"AI response received: {ai_response}")
-            else:
-                ai_response = "Message sent successfully! Your website will be ready in about 40 seconds. Please wait..."
-                print("No AI response found, using default message")
-            
-            # Save AI response
-            ai_message = Message(content=ai_response, is_user=False, chat_id=chat_id)
-            db.session.add(ai_message)
-            db.session.commit()
-            
-            return jsonify({
-                "status": "success",
-                "message": "Message sent!",
-                "ai_response": ai_response,
-                "start_timer": True  # Add this flag to start the timer
-            })
-            
-        except Exception as e:
-            print(f"Textarea interaction error: {e}")
-            error_message = str(e)
-            # If the error is about element not being interactable, it might be a timing issue
-            if "element not interactable" in error_message.lower():
-                return jsonify({
-                    "status": "error",
-                    "message": "Please wait a moment and try again",
-                    "ai_response": "The chat is still loading. Please wait a few seconds and try again."
-                })
-            return jsonify({
-                "status": "error",
-                "message": "Error sending message",
-                "ai_response": error_message
-            })
-        
-    except Exception as e:
-        logging.error(f"Error in send_message: {str(e)}", exc_info=True)
-        return jsonify({
-            "status": "error",
-            "message": "Failed to process message. Please try again."
-        })
+    # Save the message to the database
+    message = Message(content=user_message, is_user=True, chat_id=chat_id)
+    db.session.add(message)
+    db.session.commit()
+
+    logging.info("Message sent successfully!")
+    return jsonify({"status": "success", "message": "Message sent!"})
 
 @app.route('/download_website', methods=['POST'])
 def download_website():
@@ -573,10 +468,8 @@ def check_website_status():
         return jsonify({"status": "error", "message": str(e)})
 
 # Create database tables
-def init_db():
-    with app.app_context():
-        db.create_all()
+with app.app_context():
+    db.create_all()  # This should be called when the app starts
 
 if __name__ == '__main__':
-    init_db()  # Initialize database tables
     app.run(debug=True)
