@@ -22,21 +22,11 @@ from datetime import datetime
 IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production'
 SYSTEM_TYPE = platform.system().lower()
 
-# Database configuration
-database_url = os.environ.get('DATABASE_URL')
-if database_url and database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql://", 1)
-
+# Flask application setup
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-here')
-app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+app.config['SECRET_KEY'] = 'Kwork'  # Change this to a secure secret key
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///chat_history.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# Add this fix for Render's DATABASE_URL
-if app.config['SQLALCHEMY_DATABASE_URI'].startswith("postgres://"):
-    app.config['SQLALCHEMY_DATABASE_URI'] = app.config['SQLALCHEMY_DATABASE_URI'].replace(
-        "postgres://", "postgresql://", 1
-    )
 
 # Initialize extensions
 db.init_app(app)
@@ -80,10 +70,7 @@ def login():
                 return redirect(url_for('index'))
             else:
                 app.logger.warning("Invalid login attempt")
-                if not user:
-                    error = 'User not found'
-                else:
-                    error = 'Invalid password'
+                error = 'Invalid username or password'
                 return render_template('login.html', error=error)
         except Exception as e:
             app.logger.error(f"Login error: {str(e)}", exc_info=True)
@@ -173,26 +160,17 @@ chrome_options = Options()
 
 def init_chrome_options():
     chrome_options = Options()
-    
-    # Production-specific options
-    if IS_PRODUCTION:
-        chrome_options.add_argument('--headless')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.binary_location = os.environ.get('GOOGLE_CHROME_BIN')
-    
+    # chrome_options.add_argument('--headless')
     chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1920,1080')
     
-    # Create downloads directory based on environment
-    if IS_PRODUCTION:
-        download_dir = '/tmp/website_downloads'
-    else:
-        download_dir = os.path.join(os.path.expanduser('~'), 'Downloads', 'website_downloads')
-    
+    # Create downloads directory if it doesn't exist
+    download_dir = os.path.join(os.path.expanduser('~'), 'Downloads', 'website_downloads')
     Path(download_dir).mkdir(parents=True, exist_ok=True)
     
-    # Add download preferences
+    # Add download preferences with more permissions
     chrome_options.add_experimental_option(
         'prefs', {
             'download.default_directory': download_dir,
@@ -200,22 +178,17 @@ def init_chrome_options():
             'download.directory_upgrade': True,
             'safebrowsing.enabled': True,
             'profile.default_content_settings.popups': 0,
-            'profile.default_content_setting_values.automatic_downloads': 1
+            'profile.default_content_setting_values.automatic_downloads': 1,
+            'profile.content_settings.exceptions.automatic_downloads.*.setting': 1
         }
     )
     
-    return chrome_options
-
-def get_chromedriver_path():
-    if IS_PRODUCTION:
-        return os.environ.get('CHROMEDRIVER_PATH', '/usr/local/bin/chromedriver')
+    # Add additional permissions
+    chrome_options.add_argument('--allow-file-access-from-files')
+    chrome_options.add_argument('--allow-file-access')
+    chrome_options.add_argument('--allow-cross-origin-auth-prompt')
     
-    if SYSTEM_TYPE == 'windows':
-        return r'C:\Users\Hussain\Downloads\ChromeDriver\chromedriver.exe'
-    elif SYSTEM_TYPE == 'darwin':  # macOS
-        return '/usr/local/bin/chromedriver'
-    else:  # Linux
-        return '/usr/local/bin/chromedriver'
+    return chrome_options
 
 def load_account_details():
     try:
@@ -321,7 +294,7 @@ def send_message():
             print("Initializing new Chrome driver...")
             # Initialize Chrome driver without headless for download support
             chrome_options = init_chrome_options()
-            service = Service(get_chromedriver_path())
+            service = Service(r'C:\Users\Hussain\Downloads\ChromeDriver\chromedriver.exe')
             current_driver = webdriver.Chrome(service=service, options=chrome_options)
             current_driver.get("https://stackblitz.com/sign_in")
             print("On login page")
@@ -403,9 +376,6 @@ def send_message():
             ai_message = Message(content=ai_response, is_user=False, chat_id=chat_id)
             db.session.add(ai_message)
             db.session.commit()
-            
-            if current_driver:
-                current_driver.last_used = datetime.now()
             
             return jsonify({
                 "status": "success",
@@ -597,178 +567,11 @@ def check_website_status():
         print(f"Error checking website status: {e}")
         return jsonify({"status": "error", "message": str(e)})
 
-# Add session cleanup
-@app.before_request
-def cleanup_old_sessions():
-    global current_driver
-    if current_driver and (datetime.now() - getattr(current_driver, 'last_used', datetime.now())).seconds > 3600:
-        try:
-            current_driver.quit()
-        except:
-            pass
-        current_driver = None
-
-# Add both health check endpoints for different conventions
-@app.route("/healthz")
-def health_check():
-    return "OK", 200
-
-@app.route("/health")
-def health_check_alt():
-    try:
-        # Check database connection
-        db.session.execute('SELECT 1')
-        
-        # Check if Chrome/Selenium is available
-        chrome_options = init_chrome_options()
-        service = Service(get_chromedriver_path())
-        test_driver = webdriver.Chrome(service=service, options=chrome_options)
-        test_driver.quit()
-        
-        return jsonify({
-            "status": "healthy",
-            "database": "connected",
-            "selenium": "available",
-            "timestamp": datetime.now().isoformat()
-        }), 200
-    except Exception as e:
-        logging.error(f"Health check failed: {str(e)}")
-        return jsonify({
-            "status": "unhealthy",
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }), 500
-
-# Add this route to check database status
-@app.route('/db_status')
-def db_status():
-    try:
-        # Try to query users
-        users = User.query.all()
-        user_count = len(users)
-        return jsonify({
-            'status': 'connected',
-            'user_count': user_count,
-            'users': [user.username for user in users]
-        })
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'error': str(e)
-        }), 500
-
-# Update init_db route with more details
-@app.route('/init_db')
-def init_database():
-    try:
-        with app.app_context():
-            db.create_all()
-            app.logger.info("Tables created successfully")
-            
-            # Check if admin user exists
-            admin = User.query.filter_by(username='admin').first()
-            if not admin:
-                admin = User(username='admin')
-                admin.set_password('admin123')
-                db.session.add(admin)
-                db.session.commit()
-                app.logger.info("Admin user created successfully")
-                return 'Database initialized and admin user created successfully!'
-            else:
-                app.logger.info("Admin user already exists")
-                return 'Database already initialized with admin user!'
-                
-    except Exception as e:
-        app.logger.error(f"Database initialization error: {str(e)}", exc_info=True)
-        return f'Error initializing database: {str(e)}'
-
 # Create database tables
 def init_db():
     with app.app_context():
         db.create_all()
 
-# Add this to debug the connection
-@app.route('/db_info')
-def db_info():
-    try:
-        # Test connection
-        db.session.execute('SELECT 1')
-        return jsonify({
-            'status': 'connected',
-            'database_url': database_url.split('@')[1] if database_url else 'Not set',
-            'tables': db.engine.table_names()
-        })
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'error': str(e)
-        }), 500
-
-@app.before_first_request
-def initialize_database():
-    try:
-        # Create tables
-        db.create_all()
-        
-        # Create admin user if it doesn't exist
-        if not User.query.filter_by(username='admin').first():
-            admin = User(username='admin')
-            admin.set_password('admin123')
-            db.session.add(admin)
-            db.session.commit()
-            app.logger.info("Created admin user")
-    except Exception as e:
-        app.logger.error(f"Database initialization error: {str(e)}")
-
-@app.route('/test_db')
-def test_db():
-    try:
-        # Test basic connection
-        db.session.execute('SELECT 1')
-        
-        # Create tables if they don't exist
-        db.create_all()
-        
-        # Try to create admin user
-        if not User.query.filter_by(username='admin').first():
-            admin = User(username='admin')
-            admin.set_password('admin123')
-            db.session.add(admin)
-            db.session.commit()
-            return jsonify({
-                'status': 'success',
-                'message': 'Database connected and admin user created',
-                'tables': db.engine.table_names()
-            })
-        else:
-            return jsonify({
-                'status': 'success',
-                'message': 'Database connected, admin user already exists',
-                'tables': db.engine.table_names()
-            })
-            
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'error': str(e)
-        }), 500
-
 if __name__ == '__main__':
-    # Create necessary directories
-    Path('logs').mkdir(exist_ok=True)
-    
-    # Initialize database
-    with app.app_context():
-        try:
-            db.create_all()
-        except Exception as e:
-            logging.error(f"Database initialization failed: {str(e)}", exc_info=True)
-            raise
-    
-    # Start server
-    port = int(os.environ.get('PORT', 5000))
-    if IS_PRODUCTION:
-        from waitress import serve
-        serve(app, host='0.0.0.0', port=port)
-    else:
-        app.run(debug=True, port=port)
+    init_db()  # Initialize database tables
+    app.run(debug=True)
