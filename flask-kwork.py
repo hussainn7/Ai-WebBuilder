@@ -133,21 +133,29 @@ def home():
 @login_required
 def index():
     try:
+        if not current_user or not current_user.is_authenticated:
+            logging.error("User is not authenticated")
+            return jsonify({"status": "error", "message": "User not authenticated"}), 401
+
         logging.info(f"Fetching chats for user ID: {current_user.id}")
         chats = Chat.query.filter_by(user_id=current_user.id).all()
-        logging.info(f"Chats fetched: {len(chats)} found.")
 
+        logging.info(f"Chats fetched: {len(chats)}")
         if not chats:
-            logging.info("No chats found for the user. Creating a new chat.")
+            logging.info("No chats found. Creating a new chat.")
             new_chat = Chat(user_id=current_user.id, title="New Chat")
             db.session.add(new_chat)
             db.session.commit()
             chats.append(new_chat)
 
         return render_template('index.html', chats=chats)
+
     except Exception as e:
-        logging.error(f"Error fetching chats: {str(e)}")
-        return jsonify({"status": "error", "message": "Failed to fetch chats"}), 500
+        logging.error(f"Error in /chat route: {str(e)}", exc_info=True)
+        return jsonify({"status": "error", "message": f"Failed to fetch chats: {str(e)}"}), 500
+
+
+
 
 @app.route('/chat/<int:chat_id>')
 @login_required
@@ -489,14 +497,17 @@ def check_website_status():
 @app.route('/create_chat', methods=['POST'])
 @login_required
 def create_chat():
+    if request.method != 'POST':
+        return jsonify({"status": "error", "message": "Invalid method"}), 405
     try:
         new_chat = Chat(user_id=current_user.id)
         db.session.add(new_chat)
         db.session.commit()
         return jsonify({"status": "success", "message": "Chat created successfully!"})
     except Exception as e:
-        logging.error(f"Error creating chat: {str(e)}")
+        logging.error(f"Error creating chat: {str(e)}", exc_info=True)
         return jsonify({"status": "error", "message": "Failed to create chat"}), 500
+
 
 # Create database tables
 with app.app_context():
