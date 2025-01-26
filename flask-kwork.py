@@ -129,33 +129,24 @@ def home():
         return redirect(url_for('index'))
     return redirect(url_for('login'))
 
-@app.route('/chat')
+@app.route('/chat', methods=['GET'])
 @login_required
 def index():
     try:
-        # Ensure the user is authenticated
-        if not current_user or not current_user.is_authenticated:
-            logging.error("User is not authenticated")
-            return jsonify({"status": "error", "message": "User not authenticated"}), 401
-
-        # Fetch chats for the user
-        logging.info(f"Fetching chats for user ID: {current_user.id}")
         chats = Chat.query.filter_by(user_id=current_user.id).all()
-
         if not chats:
-            logging.info("No chats found. Creating a new chat.")
-            # Define and create a new chat if none exists
+            logging.info("No chats found for user. Creating a new chat.")
             new_chat = Chat(user_id=current_user.id, title="New Chat")
             db.session.add(new_chat)
             db.session.commit()
-            chats.append(new_chat)  # Append the newly created chat to the chats list
-            logging.info(f"New chat created: {new_chat.id}")
+            chats = [new_chat]
 
         return render_template('index.html', chats=chats)
 
     except Exception as e:
-        logging.error(f"Error in /chat route: {str(e)}", exc_info=True)
+        logging.error(f"Error in /chat: {str(e)}", exc_info=True)
         return jsonify({"status": "error", "message": f"Failed to fetch chats: {str(e)}"}), 500
+
 
 
 
@@ -302,45 +293,50 @@ def start_task():
         "ai_response": "Hello! I'm setting up the environment and getting ready to help you. This will take about 30 seconds..."
     })
 
-@app.route('/send_message', methods=['POST'])
+@app.route('/send_message', methods=['GET', 'POST'])
 @login_required
 def send_message():
     try:
+        if request.method == 'GET':
+            return jsonify({
+                "status": "error",
+                "message": "This endpoint only supports POST requests. Use POST to send a message."
+            }), 405  # Method Not Allowed
+
+        # Extract user message and chat ID from the form
         user_message = request.form.get('user_message')
         chat_id = request.form.get('chat_id')
 
         logging.info(f"Received User Message: {user_message}, Chat ID: {chat_id}")
 
+        # Validate input
         if not user_message:
-            return jsonify({"status": "error", "message": "Message is required"}), 400
-
-        # Validate or create chat
+            return jsonify({"status": "error", "message": "Message content is required"}), 400
         if not chat_id:
-            logging.info("No chat ID provided. Creating a new chat.")
+            # Create a new chat if none is specified
             chat = Chat(user_id=current_user.id, title="New Chat")
             db.session.add(chat)
             db.session.commit()
             chat_id = chat.id
+            logging.info(f"Created a new chat for the message: Chat ID {chat_id}")
         else:
+            # Fetch the existing chat
             chat = Chat.query.get(chat_id)
             if not chat:
                 return jsonify({"status": "error", "message": "Chat not found"}), 404
 
-        # Save the message to the database
+        # Save the message
         message = Message(content=user_message, is_user=True, chat_id=chat_id)
         db.session.add(message)
         db.session.commit()
 
         logging.info(f"Message sent successfully to chat ID: {chat_id}")
-        return jsonify({
-            "status": "success",
-            "message": "Message sent!",
-            "chat_id": chat_id
-        })
+        return jsonify({"status": "success", "message": "Message sent successfully!", "chat_id": chat_id})
 
     except Exception as e:
-        logging.error(f"Error sending message: {str(e)}", exc_info=True)
+        logging.error(f"Error in send_message: {str(e)}", exc_info=True)
         return jsonify({"status": "error", "message": f"Failed to send message: {str(e)}"}), 500
+
 
 
 @app.route('/download_website', methods=['POST'])
@@ -502,20 +498,30 @@ def check_website_status():
     except Exception as e:
         print(f"Error checking website status: {e}")
         return jsonify({"status": "error", "message": str(e)})
+    
 
-@app.route('/create_chat', methods=['POST'])
+@app.route('/create_chat', methods=['GET', 'POST'])
 @login_required
 def create_chat():
-    if request.method != 'POST':
-        return jsonify({"status": "error", "message": "Invalid method"}), 405
     try:
-        new_chat = Chat(user_id=current_user.id)
+        if request.method == 'GET':
+            return jsonify({
+                "status": "error",
+                "message": "This endpoint only supports POST requests. Use POST to create a new chat."
+            }), 405  # Method Not Allowed
+
+        # Create a new chat for the user
+        new_chat = Chat(user_id=current_user.id, title="New Chat")
         db.session.add(new_chat)
         db.session.commit()
-        return jsonify({"status": "success", "message": "Chat created successfully!"})
+
+        logging.info(f"New chat created with ID: {new_chat.id} for user ID: {current_user.id}")
+        return jsonify({"status": "success", "message": "Chat created successfully!", "chat_id": new_chat.id})
+
     except Exception as e:
         logging.error(f"Error creating chat: {str(e)}", exc_info=True)
-        return jsonify({"status": "error", "message": "Failed to create chat"}), 500
+        return jsonify({"status": "error", "message": f"Failed to create chat: {str(e)}"}), 500
+
 
 
 # Create database tables
