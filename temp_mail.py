@@ -21,7 +21,7 @@ HEADERS = {
 }
 
 # Path to ChromeDriver
-DRIVER_PATH = r'C:\Users\Hussain\Downloads\ChromeDriver\chromedriver.exe'
+DRIVER_PATH = './driver'
 
 def save_account_details(email, username, password):
     try:
@@ -97,7 +97,7 @@ def wait_for_email(email_address):
 def init_chrome_options():
     chrome_options = Options()
     # Always use headless for production
-    # chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--headless')
     chrome_options.add_argument('--disable-gpu')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
@@ -108,11 +108,22 @@ def init_chrome_options():
     
     return chrome_options
 
+def init_chrome_with_retry(max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            chrome_options = init_chrome_options()
+            service = Service(DRIVER_PATH)
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            return driver
+        except Exception as e:
+            print(f"Attempt {attempt + 1} failed: {e}")
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(2)
+
 def perform_registration_and_verify(email):
     try:
-        chrome_options = init_chrome_options()
-        service = Service(DRIVER_PATH)
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver = init_chrome_with_retry()
         try:
             # Open registration page
             driver.get("https://stackblitz.com/register")
@@ -166,6 +177,24 @@ def main():
         perform_registration_and_verify(temp_email)
     else:
         print("Failed to generate a temporary email. Aborting.")
+
+def cleanup_driver(driver):
+    if driver:
+        try:
+            driver.quit()
+            print("✓ Driver closed successfully")
+        except Exception as e:
+            print(f"× Error closing driver: {e}")
+
+def validate_chrome_setup():
+    if not os.path.exists(DRIVER_PATH):
+        raise Exception("ChromeDriver not found. Please install ChromeDriver first.")
+    
+    if not os.access(DRIVER_PATH, os.X_OK):
+        try:
+            os.chmod(DRIVER_PATH, 0o755)
+        except Exception as e:
+            raise Exception(f"Cannot set ChromeDriver permissions: {e}")
 
 if __name__ == "__main__":
     main()
