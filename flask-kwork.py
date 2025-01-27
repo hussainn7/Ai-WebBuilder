@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, send_file
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from threading import Thread
 from selenium import webdriver
@@ -12,18 +12,11 @@ import json
 from models import db, User, Chat, Message
 import os
 import time
-from temp_mail import get_temp_email, perform_registration_and_verify  # Import from your existing script
+from temp_mail import get_temp_email, perform_registration_and_verify, cleanup_driver  # Import from your existing script
 from pathlib import Path
-import platform
-import logging
-from datetime import datetime
-from werkzeug.security import generate_password_hash, check_password_hash
+import subprocess
+import sys
 
-# Environment and system configuration
-IS_PRODUCTION = os.environ.get('FLASK_ENV') == 'production'
-SYSTEM_TYPE = platform.system().lower()
-
-# Flask application setup
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'Kwork'  # Change this to a secure secret key
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///chat_history.db'
@@ -37,20 +30,6 @@ login_manager.login_view = 'login'
 
 current_driver = None
 
-
-def init_db():
-    with app.app_context():
-        db.create_all()
-
-# Set up logging
-logging.basicConfig(
-    filename='app.log',
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-
-
-
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -59,65 +38,45 @@ def load_user(user_id):
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
-        app.logger.info("User already authenticated")
         return redirect(url_for('index'))
-    
+        
     if request.method == 'POST':
-        try:
-            username = request.form.get('username')
-            password = request.form.get('password')
-            app.logger.info(f"Login attempt for username: {username}")
-            
-            user = User.query.filter_by(username=username).first()
-            app.logger.info(f"User found: {user is not None}")
-            
-            if user:
-                app.logger.info("User found, checking password.")
-                if user.check_password(password):
-                    app.logger.info("Password check passed.")
-                    login_user(user)
-                    return redirect(url_for('index'))
-                else:
-                    app.logger.warning("Invalid password.")
-            else:
-                app.logger.warning("User not found.")
-            
-            error = 'Invalid username or password'
-            return render_template('login.html', error=error)
-        except Exception as e:
-            app.logger.error(f"Login error: {str(e)}", exc_info=True)
-            return render_template('login.html', error=f'Login error: {str(e)}')
-    
+        username = request.form.get('username')
+        password = request.form.get('password')
+        user = User.query.filter_by(username=username).first()
+        
+        if user and user.check_password(password):
+            login_user(user)
+            return redirect(url_for('index'))
+        
+        flash('Invalid username or password')
     return render_template('login.html')
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if current_user.is_authenticated:
         return redirect(url_for('index'))
-    
+        
     if request.method == 'POST':
-        try:
-            username = request.form.get('username')
-            password = request.form.get('password')
-            
-            if User.query.filter_by(username=username).first():
-                return render_template('register.html', error='Username already exists')
-            
-            user = User(username=username)
-            user.set_password(password)
-            db.session.add(user)
-            db.session.commit()
-            
-            login_user(user)
-            return redirect(url_for('index'))
-        except Exception as e:
-            app.logger.error(f"Registration error: {str(e)}")
-            return render_template('register.html', error='An error occurred during registration')
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        if User.query.filter_by(username=username).first():
+            flash('Username already exists')
+            return redirect(url_for('register'))
+        
+        user = User(username=username)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+        
+        login_user(user)
+        return redirect(url_for('index'))
     
     return render_template('register.html')
 
 @app.route('/logout')
-# @login_required
+@login_required
 def logout():
     logout_user()
     return redirect(url_for('login'))
@@ -129,67 +88,67 @@ def home():
         return redirect(url_for('index'))
     return redirect(url_for('login'))
 
-@app.route('/chat', methods=['GET'])
+@app.route('/chat')
+@login_required
 def index():
-    try:
-        # Use a placeholder user ID
-        user_id = 1
-
-        # Fetch chats for the user
-        chats = Chat.query.filter_by(user_id=user_id).all()
-
-        if not chats:
-            logging.info("No chats found. Creating a new chat.")
-            new_chat = Chat(user_id=user_id, title="New Chat")
-            db.session.add(new_chat)
-            db.session.commit()
-            chats.append(new_chat)
-
-        return render_template('index.html', chats=chats)
-
-    except Exception as e:
-        logging.error(f"Error in /chat route: {str(e)}", exc_info=True)
-        return jsonify({"status": "error", "message": f"Failed to fetch chats: {str(e)}"}), 500
-
-
-
-
-
-
+    chats = Chat.query.filter_by(user_id=current_user.id)\
+        .order_by(Chat.created_at.desc())\
+        .limit(20)\
+        .all()
+    return render_template('index.html', 
+                         chats=chats,
+                         current_chat=None,
+                         current_chat_id=None,
+                         messages=[])
 
 @app.route('/chat/<int:chat_id>')
-# @login_required
+@login_required
 def view_chat(chat_id):
     chat = Chat.query.get_or_404(chat_id)
-    messages = Message.query.filter_by(chat_id=chat_id).all()
-    return render_template('chat.html', chat=chat, messages=messages)
+    if chat.user_id != current_user.id:
+        return redirect(url_for('index'))
+    
+    messages = Message.query.filter_by(chat_id=chat_id)\
+        .order_by(Message.timestamp.desc())\
+        .limit(50)\
+        .all()
+    
+    chats = Chat.query.filter_by(user_id=current_user.id)\
+        .order_by(Chat.created_at.desc())\
+        .limit(20)\
+        .all()
+    
+    return render_template('index.html', 
+                         current_chat=chat, 
+                         current_chat_id=chat_id,
+                         messages=messages[::-1],
+                         chats=chats)
 
 # Initialize driver path and options
-driver_path = '/usr/local/bin/chromedriver'  # Update this to your actual path
+driver_path = 'driver'
 service = Service(driver_path)
+chrome_options = Options()
 
 def init_chrome_options():
     chrome_options = Options()
-    chrome_options.add_argument('--headless')  # Run in headless mode
-    # chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
+    # chrome_options.add_argument('--headless')
     chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1920,1080')
     
     # Create downloads directory if it doesn't exist
     download_dir = os.path.join(os.path.expanduser('~'), 'Downloads', 'website_downloads')
     Path(download_dir).mkdir(parents=True, exist_ok=True)
     
-    # Add download preferences with more permissions
+    # Modified download preferences to prompt for download location
     chrome_options.add_experimental_option(
         'prefs', {
-            'download.default_directory': download_dir,
-            'download.prompt_for_download': False,
+            'download.prompt_for_download': True,  # Changed to True to show the prompt
             'download.directory_upgrade': True,
             'safebrowsing.enabled': True,
             'profile.default_content_settings.popups': 0,
-            'profile.default_content_setting_values.automatic_downloads': 1,
-            'profile.content_settings.exceptions.automatic_downloads.*.setting': 1
+            'profile.default_content_setting_values.automatic_downloads': 1
         }
     )
     
@@ -199,8 +158,6 @@ def init_chrome_options():
     chrome_options.add_argument('--allow-cross-origin-auth-prompt')
     
     return chrome_options
-
-chrome_options = init_chrome_options()  # Initialize options
 
 def load_account_details():
     try:
@@ -221,11 +178,7 @@ def automate_task(user_message):
     password = account["password"]
 
     chrome_options = init_chrome_options()
-    try:
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-    except Exception as e:
-        logging.error(f"Failed to initialize WebDriver: {str(e)}")
-        return jsonify({"status": "error", "message": "Failed to initialize WebDriver"})
+    driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.get("https://stackblitz.com/sign_in")
     print('on link')
     try:
@@ -247,7 +200,7 @@ def automate_task(user_message):
 
         # Skip any further interactions and directly go to the link after login
         driver.get("https://bolt.new/?utm_campaign=stackblitz-on-page&utm_source=web-app&utm_medium=nav-button")
-        print("Opened the Bolt link!")
+        print("Going in")
 
         time.sleep(1)
 
@@ -299,152 +252,297 @@ def start_task():
     })
 
 @app.route('/send_message', methods=['POST'])
+@login_required
 def send_message():
+    global current_driver
+    user_message = request.form['user_message']
+    chat_id = request.form.get('chat_id')
+    
     try:
-        user_message = request.form.get('user_message')
-        chat_id = request.form.get('chat_id')
+        if not current_driver:
+            print("Initializing new Chrome driver...")
+            # Initialize Chrome driver without headless for download support
+            chrome_options = init_chrome_options()
+            service = Service('./driver')
+            current_driver = webdriver.Chrome(service=service, options=chrome_options)
+            current_driver.get("https://stackblitz.com/sign_in")
+            print("On login page")
+            
+            # Login process
+            wait = WebDriverWait(current_driver, 15)
+            email_field = wait.until(EC.presence_of_element_located((By.NAME, "login")))
+            password_field = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='password']")))
+            
+            # Load credentials from accounts.json
+            account = load_account_details()
+            if not account:
+                return jsonify({"status": "error", "message": "No account credentials found"})
+            
+            print("Entering credentials...")
+            email_field.send_keys(account["email"])
+            password_field.send_keys(account["password"])
+            password_field.send_keys(Keys.RETURN)
+            time.sleep(2)  # Increased wait time
+            
+            print("Navigating to Bolt...")
+            # Navigate to Bolt
+            current_driver.get("https://bolt.new/?utm_campaign=stackblitz-on-page&utm_source=web-app&utm_medium=nav-button")
+            time.sleep(2)  # Increased wait time
 
-        if not user_message:
-            return jsonify({"status": "error", "message": "Message content is required"}), 400
+            print("Looking for sign-in button...")
+            # Click the sign-in button if available
+            try:
+                sign_in_button = wait.until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, "button.flex.rounded-md.items-center.justify-center"))
+                )
+                print("Sign-in button found and ready to click.")
+                sign_in_button.click()
+                print("Sign-in button clicked")
+            except Exception as e:
+                print(f"Button click failed or issue: {e}")
 
-        user_id = 1  # Replace current_user.id with a static user ID
+            time.sleep(3)  # Increased wait time
 
-        if not chat_id:
-            chat = Chat(user_id=user_id, title="New Chat")
-            db.session.add(chat)
+        print("Looking for textarea...")
+        # First check if textarea is interactable
+        wait = WebDriverWait(current_driver, 15)
+        try:
+            textarea = wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "textarea.w-full.pl-4.pt-4.pr-16"))
+            )
+            
+            # If textarea exists but is disabled, it means no prompts
+            if not textarea.is_enabled():
+                print("Textarea is disabled - no prompts available")
+                return jsonify({
+                    "status": "error",
+                    "message": "No prompts available",
+                    "ai_response": "Not working right now, wait a bit or create a new account"
+                })
+            
+            print("Sending message...")
+            # If we get here, textarea is enabled and we can send the message
+            textarea.clear()
+            textarea.send_keys(user_message)
+            textarea.send_keys(Keys.RETURN)
+            print("Message sent successfully!")
+            
+            # Save user message
+            message = Message(content=user_message, is_user=True, chat_id=chat_id)
+            db.session.add(message)
             db.session.commit()
-            chat_id = chat.id
-        else:
-            chat = Chat.query.get(chat_id)
-            if not chat:
-                return jsonify({"status": "error", "message": "Chat not found"}), 404
-
-        message = Message(content=user_message, is_user=True, chat_id=chat_id)
-        db.session.add(message)
-        db.session.commit()
-
-        return jsonify({"status": "success", "message": "Message sent successfully!", "chat_id": chat_id})
-
+            
+            # Look for the last message in the chat
+            messages = current_driver.find_elements(By.CSS_SELECTOR, ".message-list .message")
+            if messages:
+                ai_response = messages[-1].text  # Get the last message
+                print(f"AI response received: {ai_response}")
+            else:
+                ai_response = "Message sent successfully! Your website will be ready in about 40 seconds. Please wait..."
+                print("No AI response found, using default message")
+            
+            # Save AI response
+            ai_message = Message(content=ai_response, is_user=False, chat_id=chat_id)
+            db.session.add(ai_message)
+            db.session.commit()
+            
+            return jsonify({
+                "status": "success",
+                "message": "Message sent!",
+                "ai_response": ai_response,
+                "start_timer": True  # Add this flag to start the timer
+            })
+            
+        except Exception as e:
+            print(f"Textarea interaction error: {e}")
+            error_message = str(e)
+            # If the error is about element not being interactable, it might be a timing issue
+            if "element not interactable" in error_message.lower():
+                return jsonify({
+                    "status": "error",
+                    "message": "Please wait a moment and try again",
+                    "ai_response": "The chat is still loading. Please wait a few seconds and try again."
+                })
+            return jsonify({
+                "status": "error",
+                "message": "Error sending message",
+                "ai_response": error_message
+            })
+        
     except Exception as e:
-        logging.error(f"Error sending message: {str(e)}", exc_info=True)
-        return jsonify({"status": "error", "message": f"Failed to send message: {str(e)}"}), 500
-
-
-
+        print(f"Error in send_message: {e}")
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+            "ai_response": "An error occurred while processing your request. Please try again."
+        })
 
 @app.route('/download_website', methods=['POST'])
+@login_required
 def download_website():
     global current_driver
     
     print("\n=== Starting Download Process ===")
-    print("Download button clicked in frontend")
     
     if not current_driver:
-        return jsonify({"status": "error", "message": "No active session. Please start a new automation."})
+        return jsonify({"status": "error", "message": "No active session"})
     
     try:
         wait = WebDriverWait(current_driver, 15)
         
-        print(f"Current URL: {current_driver.current_url}")
-        print("Driver session is active")
+        # Set up download directory
+        user_home = os.path.expanduser('~')
+        download_dir = os.path.join(user_home, 'Downloads', 'website_downloads')
+        os.makedirs(download_dir, exist_ok=True)
+        print(f"Download directory: {download_dir}")
+
+        # Set Chrome download preferences
+        current_driver.execute_cdp_cmd('Page.setDownloadBehavior', {
+            'behavior': 'allow',
+            'downloadPath': download_dir
+        })
         
-        # Click Export button using class selector
-        print("\nStep 1: Looking for Export button...")
-        try:
-            export_button = wait.until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "div.i-ph\\:export.text-lg"))
-            )
-            print("✓ Export button found")
-            print("Attempting to click export button's parent...")
-            parent = export_button.find_element(By.XPATH, "..")
-            parent.click()
-            print("✓ Export button clicked successfully")
-        except Exception as e:
-            print(f"Export button error: {str(e)}")
-            raise
+        print("Step 1: Looking for Export button...")
+        export_button = wait.until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "div.i-ph\\:export.text-lg"))
+        )
+        export_button.find_element(By.XPATH, "..").click()
+        print("✓ Export button clicked")
         
-        time.sleep(2)  # Wait for download menu to appear
-        print("\nStep 2: Waiting for download menu...")
+        time.sleep(2)
         
-        # Click Download button using class selector
-        print("Looking for Download button...")
-        try:
-            download_button = wait.until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "div.i-ph\\:download-simple.size-4\\.5"))
-            )
-            print("✓ Download button found")
-            print("Attempting to click download button's parent...")
-            parent = download_button.find_element(By.XPATH, "..")
-            parent.click()
-            print("✓ Download button clicked successfully")
+        print("Step 2: Looking for Download button...")
+        download_button = wait.until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "div.i-ph\\:download-simple.size-4\\.5"))
+        )
+        download_button.find_element(By.XPATH, "..").click()
+        print("✓ Download button clicked")
+        
+        # Wait for download to complete
+        time.sleep(10)  # Increased wait time
+        
+        # Find the downloaded file
+        files = os.listdir(download_dir)
+        zip_files = [f for f in files if f.endswith('.zip')]
+        
+        if not zip_files:
+            print(f"Contents of {download_dir}:")
+            print(os.listdir(download_dir))
+            raise Exception("No zip file found in download directory")
             
-            # Wait for download to start
-            time.sleep(5)  # Increased wait time
-            
-            # Check if download directory exists and has write permissions
-            download_dir = os.path.join(os.path.expanduser('~'), 'Downloads', 'website_downloads')
-            if not os.access(download_dir, os.W_OK):
-                raise Exception(f"No write permission for directory: {download_dir}")
-                
-        except Exception as e:
-            print(f"Download button error: {str(e)}")
-            raise
+        # Get the most recent zip file
+        latest_zip = max([os.path.join(download_dir, f) for f in zip_files], 
+                        key=os.path.getctime)
         
-        print("\nStep 3: Download initiated...")
+        print(f"Found zip file: {latest_zip}")
         
         return jsonify({
             "status": "success",
-            "message": "Website download started! Check your downloads/website_downloads folder."
+            "file_path": latest_zip,
+            "message": "File ready for download"
         })
         
     except Exception as e:
-        print("\n!!! Download Process Failed !!!")
-        print(f"Error type: {type(e).__name__}")
-        print(f"Error message: {str(e)}")
-        print("Taking error screenshot...")
-        
-        try:
-            screenshot_path = "download_error.png"
-            current_driver.save_screenshot(screenshot_path)
-            print(f"✓ Error screenshot saved to {screenshot_path}")
-        except Exception as screenshot_error:
-            print(f"× Failed to save error screenshot: {screenshot_error}")
-        
-        print("=== Download Process Failed ===\n")
-            
+        print(f"Download error: {str(e)}")
         return jsonify({
             "status": "error",
             "message": f"Failed to download: {str(e)}"
         })
 
+@app.route('/get_website_file', methods=['GET'])
+@login_required
+def get_website_file():
+    file_path = request.args.get('file_path')
+    print(f"Attempting to send file: {file_path}")
+    
+    if not file_path or not os.path.exists(file_path):
+        print(f"File not found at path: {file_path}")
+        return jsonify({
+            "status": "error",
+            "message": "File not found"
+        })
+    
+    try:
+        # Send file to client
+        response = send_file(
+            file_path,
+            as_attachment=True,
+            download_name='website-project.zip',
+            mimetype='application/zip'
+        )
+        
+        print(f"File sent successfully: {file_path}")
+        return response
+        
+    except Exception as e:
+        print(f"Error sending file: {e}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to send file"
+        })
+    finally:
+        # Clean up after successful transfer
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"Cleaned up file: {file_path}")
+        except Exception as e:
+            print(f"Cleanup error: {e}")
+
 @app.route('/create_new_account', methods=['POST'])
-# @login_required
+@login_required
 def create_new_account():
     global current_driver
     try:
-        # Close current Selenium session if exists
+        # Close any existing driver
         if current_driver:
-            try:
-                current_driver.quit()
-            except:
-                pass
+            cleanup_driver(current_driver)
             current_driver = None
 
-        # Create new account using your existing script
-        temp_email = get_temp_email()
-        if temp_email:
-            perform_registration_and_verify(temp_email)
-            return jsonify({
-                "status": "success",
-                "message": "New account created successfully!"
-            })
-        else:
-            return jsonify({
-                "status": "error",
-                "message": "Failed to generate temporary email"
-            })
+        # Check if accounts.json exists and is valid
+        try:
+            with open("accounts.json", "r") as file:
+                existing_accounts = json.load(file)
+                if len(existing_accounts) >= 10:  # Limit number of accounts
+                    return jsonify({
+                        "status": "error",
+                        "message": "Maximum number of accounts reached. Please delete some old accounts."
+                    })
+        except (FileNotFoundError, json.JSONDecodeError):
+            existing_accounts = []
+
+        # Execute temp_mail.py
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        script_path = os.path.join(current_dir, 'temp_mail.py')
+        
+        result = subprocess.run(
+            [sys.executable, script_path],
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minute timeout
+        )
+        
+        if result.returncode != 0:
+            raise Exception(f"Script failed with error: {result.stderr}")
+
+        # Verify account creation
+        with open("accounts.json", "r") as file:
+            new_accounts = json.load(file)
+            if len(new_accounts) > len(existing_accounts):
+                return jsonify({
+                    "status": "success",
+                    "message": "New account created successfully!"
+                })
+            
+        raise Exception("Account creation verification failed")
+            
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            "status": "error",
+            "message": "Account creation timed out. Please try again."
+        })
     except Exception as e:
-        print(f"Error creating new account: {e}")
+        print(f"Error creating account: {e}")
         return jsonify({
             "status": "error",
             "message": f"Failed to create account: {str(e)}"
@@ -491,29 +589,44 @@ def check_website_status():
     except Exception as e:
         print(f"Error checking website status: {e}")
         return jsonify({"status": "error", "message": str(e)})
-    
 
-@app.route('/create_chat', methods=['POST'])
-def create_chat():
+@app.route('/download_project/<path:filename>')
+@login_required
+def download_project(filename):
     try:
-        user_id = 1  # Replace current_user.id with a static user ID
-        new_chat = Chat(user_id=user_id, title="New Chat")
-        db.session.add(new_chat)
-        db.session.commit()
-
-        return jsonify({"status": "success", "message": "Chat created successfully!", "chat_id": new_chat.id})
-
+        # Ensure the file exists
+        if not os.path.exists(filename):
+            return jsonify({
+                "status": "error",
+                "message": "Project file not found"
+            })
+            
+        # Send file to user with download prompt
+        return send_file(
+            filename,
+            as_attachment=True,
+            download_name='website-project.zip',
+            mimetype='application/zip'
+        )
+        
     except Exception as e:
-        logging.error(f"Error creating chat: {str(e)}", exc_info=True)
-        return jsonify({"status": "error", "message": f"Failed to create chat: {str(e)}"}), 500
-
-
-
+        print(f"Error sending file: {e}")
+        return jsonify({
+            "status": "error",
+            "message": "Failed to download project"
+        })
+    finally:
+        # Cleanup temporary file after sending
+        try:
+            os.remove(filename)
+        except:
+            pass
 
 # Create database tables
-with app.app_context():
-    db.create_all()  # This should create the tables if they don't exist
+def init_db():
+    with app.app_context():
+        db.create_all()
 
 if __name__ == '__main__':
-    init_db()
+    init_db()  # Initialize database tables
     app.run(debug=True)
