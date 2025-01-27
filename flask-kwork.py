@@ -16,6 +16,7 @@ from temp_mail import get_temp_email, perform_registration_and_verify, cleanup_d
 from pathlib import Path
 import subprocess
 import sys
+import shutil
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'Kwork'  # Change this to a secure secret key
@@ -131,33 +132,76 @@ chrome_options = Options()
 
 def init_chrome_options():
     chrome_options = Options()
-    # chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--headless')
     chrome_options.add_argument('--disable-gpu')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
     chrome_options.add_argument('--window-size=1920,1080')
     
-    # Create downloads directory if it doesn't exist
-    download_dir = os.path.join(os.path.expanduser('~'), 'Downloads', 'website_downloads')
-    Path(download_dir).mkdir(parents=True, exist_ok=True)
+    # Create a unique user data directory for each session
+    timestamp = int(time.time())
+    user_data_dir = os.path.join(os.getcwd(), f'chrome_user_data_{timestamp}')
+    download_dir = os.path.join(user_data_dir, 'downloads')
     
-    # Modified download preferences to prompt for download location
+    # Ensure old user data directories are cleaned up
+    cleanup_old_user_dirs()
+    
+    # Create fresh directories
+    os.makedirs(user_data_dir, exist_ok=True)
+    os.makedirs(download_dir, exist_ok=True)
+    
+    chrome_options.add_argument(f'--user-data-dir={user_data_dir}')
+    
+    # Set download preferences
     chrome_options.add_experimental_option(
         'prefs', {
-            'download.prompt_for_download': True,  # Changed to True to show the prompt
+            'download.default_directory': download_dir,
+            'download.prompt_for_download': False,
             'download.directory_upgrade': True,
-            'safebrowsing.enabled': True,
-            'profile.default_content_settings.popups': 0,
-            'profile.default_content_setting_values.automatic_downloads': 1
+            'safebrowsing.enabled': True
         }
     )
     
-    # Add additional permissions
-    chrome_options.add_argument('--allow-file-access-from-files')
-    chrome_options.add_argument('--allow-file-access')
-    chrome_options.add_argument('--allow-cross-origin-auth-prompt')
-    
-    return chrome_options
+    return chrome_options, user_data_dir
+
+def cleanup_old_user_dirs():
+    """Clean up old Chrome user data directories"""
+    try:
+        current_dir = os.getcwd()
+        for item in os.listdir(current_dir):
+            if item.startswith('chrome_user_data_'):
+                path = os.path.join(current_dir, item)
+                try:
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                        print(f"Cleaned up old directory: {path}")
+                except Exception as e:
+                    print(f"Error cleaning up {path}: {e}")
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+
+def cleanup_driver(driver):
+    """Properly cleanup Chrome driver and its user data directory"""
+    if driver:
+        try:
+            # Get the user data directory from the driver options
+            user_data_dir = None
+            for arg in driver.options.arguments:
+                if arg.startswith('--user-data-dir='):
+                    user_data_dir = arg.split('=')[1]
+                    break
+            
+            # Quit the driver
+            driver.quit()
+            print("✓ Driver closed successfully")
+            
+            # Remove the user data directory
+            if user_data_dir and os.path.exists(user_data_dir):
+                shutil.rmtree(user_data_dir)
+                print(f"✓ Removed user data directory: {user_data_dir}")
+                
+        except Exception as e:
+            print(f"× Error during cleanup: {e}")
 
 def load_account_details():
     try:
@@ -177,7 +221,7 @@ def automate_task(user_message):
     email = account["email"]
     password = account["password"]
 
-    chrome_options = init_chrome_options()
+    chrome_options, user_data_dir = init_chrome_options()
     driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.get("https://stackblitz.com/sign_in")
     print('on link')
@@ -261,8 +305,7 @@ def send_message():
     try:
         if not current_driver:
             print("Initializing new Chrome driver...")
-            # Initialize Chrome driver without headless for download support
-            chrome_options = init_chrome_options()
+            chrome_options, user_data_dir = init_chrome_options()
             service = Service('./driver')
             current_driver = webdriver.Chrome(service=service, options=chrome_options)
             current_driver.get("https://stackblitz.com/sign_in")
@@ -390,13 +433,12 @@ def download_website():
     try:
         wait = WebDriverWait(current_driver, 15)
         
-        # Set up download directory
-        user_home = os.path.expanduser('~')
-        download_dir = os.path.join(user_home, 'Downloads', 'website_downloads')
+        # Create a download directory in the current working directory
+        download_dir = os.path.join(os.getcwd(), 'website_downloads')
         os.makedirs(download_dir, exist_ok=True)
         print(f"Download directory: {download_dir}")
 
-        # Set Chrome download preferences
+        # Set Chrome download preferences using CDP
         current_driver.execute_cdp_cmd('Page.setDownloadBehavior', {
             'behavior': 'allow',
             'downloadPath': download_dir
@@ -486,6 +528,11 @@ def get_website_file():
             if os.path.exists(file_path):
                 os.remove(file_path)
                 print(f"Cleaned up file: {file_path}")
+                # Try to remove the directory if it's empty
+                dir_path = os.path.dirname(file_path)
+                if not os.listdir(dir_path):
+                    os.rmdir(dir_path)
+                    print(f"Removed empty directory: {dir_path}")
         except Exception as e:
             print(f"Cleanup error: {e}")
 
